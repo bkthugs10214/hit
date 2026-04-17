@@ -1,43 +1,24 @@
 """
-Forecast logger and offline evaluator.
+Forecast logger and offline evaluator — SQLite backend.
 
-Each forecast is appended to FORECAST_LOG_FILE (newline-delimited JSON).
-One hour later, fill_realized() fetches the realized prices from Binance
-and back-fills the `realized_*`, `ape`, and `interval_score` fields.
+Storage: ~/.precog_baseline/forecasts.db  (single `forecasts` table)
+Schema:  see eval/db.py
 
-Log file location: ~/.precog_baseline/forecasts.jsonl  (configurable via env)
-
-Record schema
--------------
-{
-  "logged_at":          "2024-11-14T18:15:01.123456Z",  # wall-clock time
-  "prediction_ts":      "2024-11-14T18:15:00.000000Z",  # from synapse.timestamp
-  "asset":              "btc",
-  "spot":               65000.0,    # price at prediction time
-  "point":              65020.0,    # our point forecast
-  "low":                63800.0,    # our interval lower bound
-  "high":               66200.0,    # our interval upper bound
-  "realized_price_1h":  null,       # filled 1h later
-  "realized_min_1h":    null,       # filled 1h later (candle lows)
-  "realized_max_1h":    null,       # filled 1h later (candle highs)
-  "ape":                null,       # filled 1h later
-  "interval_score":     null        # filled 1h later (approximate)
-}
+log_forecast()  — INSERT one row per prediction (called from forward function)
+fill_realized() — UPDATE rows whose 1-hour horizon has elapsed (called from main.py)
 """
-import json
 import logging
-import threading
 from datetime import datetime, timedelta, timezone
 
-from precog_baseline_miner.config import FORECAST_LOG_FILE
+from precog_baseline_miner.config import DB_FILE
+from precog_baseline_miner.eval.db import get_conn, init_db
 from precog_baseline_miner.eval.metrics import ape as compute_ape
 from precog_baseline_miner.eval.metrics import interval_score as compute_interval_score
 
 logger = logging.getLogger(__name__)
 
-# Thread-safe write lock — the miner may call log_forecast concurrently
-# for multiple assets in the same request.
-_write_lock = threading.Lock()
+# Initialise schema on first import — safe (uses IF NOT EXISTS)
+init_db(DB_FILE)
 
 
 def log_forecast(
@@ -51,101 +32,82 @@ def log_forecast(
     cm_snap: dict | None = None,
 ) -> None:
     """
-    Append one forecast record to the JSONL log.
+    INSERT one forecast row into the SQLite `forecasts` table.
 
-    Args:
-        asset, timestamp, spot, point, low, high — forecast outputs (required)
-        binance_snap — dict from candles.binance_snapshot() (optional)
-        cm_snap      — dict from cm_client.cm_snapshot()   (optional)
-
-    Silently swallows I/O errors so that a logging failure never crashes
-    the miner's forward function.
+    Silently swallows errors so a DB failure never crashes the forward function.
     """
-    record = {
-        "logged_at": datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%S.%f") + "Z",
-        "prediction_ts": timestamp,
-        "asset": asset,
-        "spot": spot,
-        "point": point,
-        "low": low,
-        "high": high,
-        "binance":     binance_snap or {},
-        "coinmetrics": cm_snap      or {},
-        "realized_price_1h": None,
-        "realized_min_1h": None,
-        "realized_max_1h": None,
-        "ape": None,
-        "interval_score": None,
-    }
+    b = binance_snap or {}
+    c = cm_snap or {}
+    logged_at = datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%S.%f") + "Z"
 
-    with _write_lock:
-        try:
-            with open(FORECAST_LOG_FILE, "a") as fh:
-                fh.write(json.dumps(record) + "\n")
-        except Exception as exc:
-            logger.error("Failed to write forecast log: %s", exc)
+    try:
+        conn = get_conn(DB_FILE)
+        conn.execute(
+            """
+            INSERT INTO forecasts (
+                logged_at, prediction_ts, asset, spot, point, low, high,
+                b_ret_5m, b_ret_15m, b_ret_60m, b_rvol_1m,
+                b_volume_60m, b_vwap_60m, b_n_candles,
+                cm_available, cm_spot, cm_ret_1h, cm_rvol_1m,
+                cm_n_obs, cm_frequency, cm_source
+            ) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
+            """,
+            (
+                logged_at, timestamp, asset, spot, point, low, high,
+                b.get("ret_5m"), b.get("ret_15m"), b.get("ret_60m"),
+                b.get("rvol_1m"), b.get("volume_60m"), b.get("vwap_60m"),
+                b.get("n_candles"),
+                1 if c.get("available") else 0,
+                c.get("cm_spot"), c.get("cm_ret_1h"), c.get("cm_rvol_1m"),
+                c.get("n_observations"), c.get("frequency"), c.get("source"),
+            ),
+        )
+        conn.commit()
+    except Exception as exc:
+        logger.error("Failed to write forecast to DB: %s", exc)
 
 
 def fill_realized() -> int:
     """
-    Back-fill realized prices for any forecasts whose 1-hour horizon has passed.
+    UPDATE rows whose 1-hour evaluation horizon has passed with realized prices.
 
-    Reads FORECAST_LOG_FILE, finds records where `realized_price_1h` is None
-    and the horizon has elapsed, fetches the corresponding Binance candles,
-    and rewrites the file with the filled-in values.
-
-    Returns:
-        Number of records updated.
+    Fetches 1-min Binance candles for the prediction window, computes APE and
+    interval score, and writes them back.  Returns the number of rows updated.
     """
-    if not FORECAST_LOG_FILE.exists():
-        return 0
-
-    # Import here to avoid a circular import (binance_client → config, not eval)
+    # Import here to avoid circular imports (binance_client → config, not eval)
     from precog_baseline_miner.data.binance_client import fetch_candles
 
-    with _write_lock:
-        text = FORECAST_LOG_FILE.read_text()
+    conn = get_conn(DB_FILE)
+    rows = conn.execute(
+        "SELECT id, asset, prediction_ts, point, low, high "
+        "FROM forecasts WHERE realized_price_1h IS NULL"
+    ).fetchall()
 
-    lines = [ln for ln in text.splitlines() if ln.strip()]
-    if not lines:
+    if not rows:
         return 0
-
-    records = []
-    for line in lines:
-        try:
-            records.append(json.loads(line))
-        except json.JSONDecodeError as exc:
-            logger.warning("Skipping malformed log line: %s", exc)
 
     now = datetime.now(timezone.utc)
     updated = 0
 
-    for rec in records:
-        if rec.get("realized_price_1h") is not None:
-            continue  # already filled
-
-        # Parse prediction timestamp
+    for row in rows:
         try:
             pred_ts = datetime.fromisoformat(
-                rec["prediction_ts"].replace("Z", "+00:00")
+                row["prediction_ts"].replace("Z", "+00:00")
             )
         except (KeyError, ValueError) as exc:
-            logger.debug("Cannot parse prediction_ts in record: %s", exc)
+            logger.debug("Cannot parse prediction_ts for id=%s: %s", row["id"], exc)
             continue
 
         eval_ts = pred_ts + timedelta(hours=1)
         if eval_ts > now:
-            continue  # horizon not yet reached
+            continue
 
-        # Fetch the 1-hour window of 1-min candles from Binance
         try:
-            asset = rec["asset"]
-            # Convert to milliseconds for the Binance startTime/endTime params
             start_ms = int(pred_ts.timestamp() * 1000)
-            end_ms = int(eval_ts.timestamp() * 1000)
+            end_ms   = int(eval_ts.timestamp() * 1000)
 
             candles = fetch_candles(
-                asset,
+                row["asset"],
                 interval="1m",
                 limit=65,
                 start_ms=start_ms,
@@ -153,36 +115,36 @@ def fill_realized() -> int:
             )
 
             if candles.empty:
-                logger.warning("No candles returned for %s fill_realized", asset)
+                logger.warning("No candles returned for %s fill_realized", row["asset"])
                 continue
 
             realized_price = float(candles["close"].iloc[-1])
-            realized_min = float(candles["low"].min())
-            realized_max = float(candles["high"].max())
-
-            rec["realized_price_1h"] = realized_price
-            rec["realized_min_1h"] = realized_min
-            rec["realized_max_1h"] = realized_max
-            rec["ape"] = compute_ape(rec["point"], realized_price)
-            rec["interval_score"] = compute_interval_score(
-                rec["low"], rec["high"], realized_min, realized_max
+            realized_min   = float(candles["low"].min())
+            realized_max   = float(candles["high"].max())
+            ape_val        = compute_ape(row["point"], realized_price)
+            is_val         = compute_interval_score(
+                row["low"], row["high"], realized_min, realized_max
             )
+
+            conn.execute(
+                """
+                UPDATE forecasts
+                SET realized_price_1h=?, realized_min_1h=?, realized_max_1h=?,
+                    ape=?, interval_score=?
+                WHERE id=?
+                """,
+                (realized_price, realized_min, realized_max, ape_val, is_val, row["id"]),
+            )
+            conn.commit()
             updated += 1
 
         except Exception as exc:
             logger.warning(
                 "Could not fill realized for asset=%s ts=%s: %s",
-                rec.get("asset"),
-                rec.get("prediction_ts"),
-                exc,
+                row["asset"], row["prediction_ts"], exc,
             )
 
     if updated:
-        with _write_lock:
-            with open(FORECAST_LOG_FILE, "w") as fh:
-                for rec in records:
-                    fh.write(json.dumps(rec) + "\n")
-
         logger.info("fill_realized: updated %d record(s)", updated)
 
     return updated

@@ -26,7 +26,7 @@ _root = _os.path.dirname(_here)
 if _root not in sys.path:
     sys.path.insert(0, _root)
 
-from precog_baseline_miner.config import FORECAST_LOG_FILE
+from precog_baseline_miner.config import DB_FILE
 from precog_baseline_miner.data.binance_client import fetch_candles
 from precog_baseline_miner.data.candles import binance_snapshot
 from precog_baseline_miner.data.cm_client import cm_snapshot, fetch_reference_rates
@@ -97,7 +97,7 @@ def run_once() -> bool:
             logger.error("  %-20s  FAILED: %s", asset, exc)
 
     print()
-    print(f"Forecast log: {FORECAST_LOG_FILE}")
+    print(f"Forecast DB:  {DB_FILE}")
 
     # Try to fill any past forecasts whose 1-hour horizon has passed
     filled = fill_realized()
