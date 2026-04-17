@@ -35,6 +35,8 @@ from precog_baseline_miner.config import (
     POINT_SHRINKAGE,
 )
 from precog_baseline_miner.data.binance_client import fetch_candles
+from precog_baseline_miner.data.candles import binance_snapshot
+from precog_baseline_miner.data.cm_client import cm_snapshot, fetch_reference_rates
 from precog_baseline_miner.eval.recorder import log_forecast
 from precog_baseline_miner.forecast.baseline import compute_point_forecast
 from precog_baseline_miner.forecast.interval import compute_interval
@@ -74,12 +76,23 @@ async def forward(synapse, cm):
         # ── Primary path: Binance ─────────────────────────────────────────────
         try:
             candles = fetch_candles(asset, limit=DEFAULT_CANDLE_LIMIT)
-            spot = float(candles["close"].iloc[-1])
+            spot  = float(candles["close"].iloc[-1])
             point = compute_point_forecast(candles, shrinkage=POINT_SHRINKAGE)
             lo, hi = compute_interval(candles, point, multiplier=INTERVAL_MULTIPLIER)
 
+            b_snap = binance_snapshot(candles)
+
+            # Fetch CoinMetrics reference rates in parallel for logging —
+            # failures here never block the forecast from being returned.
+            try:
+                cm_df  = fetch_reference_rates(asset, frequency="1m", lookback_hours=1)
+                c_snap = cm_snapshot(cm_df)
+            except Exception as cm_exc:
+                bt.logging.debug(f"[baseline] CM data unavailable for '{asset}': {cm_exc}")
+                c_snap = {"available": False}
+
             predictions[asset] = round(point, 4)
-            intervals[asset] = [round(lo, 4), round(hi, 4)]
+            intervals[asset]   = [round(lo, 4), round(hi, 4)]
 
             log_forecast(
                 asset=asset,
@@ -88,6 +101,8 @@ async def forward(synapse, cm):
                 point=point,
                 low=lo,
                 high=hi,
+                binance_snap=b_snap,
+                cm_snap=c_snap,
             )
 
             bt.logging.info(

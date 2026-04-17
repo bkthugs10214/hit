@@ -28,6 +28,8 @@ if _root not in sys.path:
 
 from precog_baseline_miner.config import FORECAST_LOG_FILE
 from precog_baseline_miner.data.binance_client import fetch_candles
+from precog_baseline_miner.data.candles import binance_snapshot
+from precog_baseline_miner.data.cm_client import cm_snapshot, fetch_reference_rates
 from precog_baseline_miner.eval.recorder import fill_realized, log_forecast
 from precog_baseline_miner.forecast.baseline import compute_point_forecast
 from precog_baseline_miner.forecast.interval import compute_interval
@@ -57,13 +59,23 @@ def run_once() -> bool:
     for asset in assets:
         try:
             candles = fetch_candles(asset, limit=100)
-            spot = float(candles["close"].iloc[-1])
+            spot  = float(candles["close"].iloc[-1])
             point = compute_point_forecast(candles)
             lo, hi = compute_interval(candles, point)
+            b_snap = binance_snapshot(candles)
+
+            # CoinMetrics — best-effort, never blocks the forecast
+            try:
+                cm_df  = fetch_reference_rates(asset, frequency="1m", lookback_hours=1)
+                c_snap = cm_snapshot(cm_df)
+                cm_spot_str = f"  cm_spot=${c_snap['cm_spot']:>12,.2f}" if c_snap.get("cm_spot") else "  cm_spot=unavailable"
+            except Exception as cm_exc:
+                c_snap = {"available": False}
+                cm_spot_str = f"  cm_spot=error({cm_exc.__class__.__name__})"
 
             print(
                 f"  {asset:<20}  "
-                f"spot=${spot:>12,.2f}  "
+                f"spot=${spot:>12,.2f}{cm_spot_str}  "
                 f"point=${point:>12,.2f}  "
                 f"interval=[${lo:>12,.2f}, ${hi:>12,.2f}]  "
                 f"width={100*(hi-lo)/point:.2f}%"
@@ -76,6 +88,8 @@ def run_once() -> bool:
                 point=point,
                 low=lo,
                 high=hi,
+                binance_snap=b_snap,
+                cm_snap=c_snap,
             )
             any_success = True
 

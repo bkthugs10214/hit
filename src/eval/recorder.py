@@ -47,9 +47,16 @@ def log_forecast(
     point: float,
     low: float,
     high: float,
+    binance_snap: dict | None = None,
+    cm_snap: dict | None = None,
 ) -> None:
     """
     Append one forecast record to the JSONL log.
+
+    Args:
+        asset, timestamp, spot, point, low, high — forecast outputs (required)
+        binance_snap — dict from candles.binance_snapshot() (optional)
+        cm_snap      — dict from cm_client.cm_snapshot()   (optional)
 
     Silently swallows I/O errors so that a logging failure never crashes
     the miner's forward function.
@@ -62,6 +69,8 @@ def log_forecast(
         "point": point,
         "low": low,
         "high": high,
+        "binance":     binance_snap or {},
+        "coinmetrics": cm_snap      or {},
         "realized_price_1h": None,
         "realized_min_1h": None,
         "realized_max_1h": None,
