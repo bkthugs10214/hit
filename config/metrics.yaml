@@ -1,0 +1,49 @@
+metrics:
+
+  - name: ape
+    description: "Absolute Percentage Error of the point forecast"
+    unit: fraction
+    default_aggregation: mean
+    display_format: "%.4f"
+
+  - name: interval_score
+    description: "Interval inclusion × width score (higher is better)"
+    unit: fraction
+    default_aggregation: mean
+    display_format: "%.4f"
+
+  - name: spot
+    description: "Price at prediction time (Binance last close)"
+    unit: USD
+    default_aggregation: last
+    display_format: "$%,.2f"
+
+  - name: point
+    description: "Point price forecast"
+    unit: USD
+    default_aggregation: last
+    display_format: "$%,.2f"
+
+  - name: b_ret_5m
+    description: "5-minute momentum return (Binance)"
+    unit: fraction
+    default_aggregation: mean
+    display_format: "%.4f"
+
+  - name: b_ret_15m
+    description: "15-minute momentum return (Binance)"
+    unit: fraction
+    default_aggregation: mean
+    display_format: "%.4f"
+
+  - name: b_rvol_1m
+    description: "Realized volatility, std of 1-min pct returns (Binance)"
+    unit: fraction
+    default_aggregation: mean
+    display_format: "%.6f"
+
+  - name: cm_spot
+    description: "CoinMetrics reference rate at prediction time"
+    unit: USD
+    default_aggregation: last
+    display_format: "$%,.2f"

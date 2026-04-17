@@ -1,0 +1,43 @@
+datasets:
+
+  # ── Normalized ───────────────────────────────────────────────────────────────
+
+  - name: forecasts
+    layer: normalized
+    source: precog/forecasts
+    primary_timestamp: prediction_ts
+    entity_key: asset
+    partitions: [date]
+    description: "One row per miner prediction: inputs + point + interval"
+
+  - name: realizations
+    layer: normalized
+    source: precog/realizations
+    primary_timestamp: prediction_ts
+    entity_key: asset
+    partitions: [date]
+    description: "Realized price outcomes back-filled ~1 h after each prediction"
+
+  # ── Serving ──────────────────────────────────────────────────────────────────
+
+  - name: price_predictions
+    layer: serving
+    type: timeseries
+    granularities: [5m, 1h, 1d]
+    primary_timestamp: prediction_ts
+    bucket_start_field: bucket_start
+    entity_key: asset
+    dimensions:
+      - asset
+    measures:
+      - spot
+      - point
+      - low
+      - high
+      - b_ret_5m
+      - b_ret_15m
+      - b_rvol_1m
+      - cm_spot
+      - ape
+      - interval_score
+    description: "Merged forecast + realization view for dashboards"

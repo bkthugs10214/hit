@@ -12,7 +12,7 @@ from setuptools import setup
 # Explicit package list with src/ directory mapping.
 # This allows src/data/binance_client.py to be imported as
 # precog_baseline_miner.data.binance_client, etc.
-SUBPACKAGES = ["data", "features", "forecast", "miner", "eval", "utils"]
+SUBPACKAGES = ["data", "features", "forecast", "miner", "eval", "utils", "storage"]
 
 packages = ["precog_baseline_miner"] + [
     f"precog_baseline_miner.{sub}" for sub in SUBPACKAGES
@@ -34,6 +34,9 @@ setup(
         "requests>=2.32",
         "pandas>=2.2",
         "numpy>=1.26",
+        "pyarrow>=15",
+        "zstandard>=0.22",
+        "pyyaml>=6",
     ],
     extras_require={
         "dev": ["pytest>=8", "pytest-asyncio>=0.23"],

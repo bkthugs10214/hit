@@ -7,19 +7,18 @@ or overridden on the command line before running the miner.
 import os
 from pathlib import Path
 
-# ── Forecast log directory ────────────────────────────────────────────────────
-# Forecasts are appended to FORECAST_LOG_FILE as newline-delimited JSON.
-LOG_DIR = Path(
-    os.environ.get("PRECOG_BASELINE_LOG_DIR", "")
+# ── Data root ─────────────────────────────────────────────────────────────────
+# All storage layers live under DATA_DIR:
+#   raw/       — append-only JSONL.zst event archive  (Layer 2)
+#   normalized/ — Parquet, partitioned by date         (Layer 3)
+#   features/  — derived Parquet datasets              (Layer 4)
+#   serving/   — visualization-ready Parquet           (Layer 5)
+DATA_DIR = Path(
+    os.environ.get("PRECOG_BASELINE_DATA_DIR", "")
+    or os.environ.get("PRECOG_BASELINE_LOG_DIR", "")
     or Path.home() / ".precog_baseline"
 )
-LOG_DIR.mkdir(parents=True, exist_ok=True)
-
-# SQLite database — all forecast data, Binance snapshots, and CM snapshots
-DB_FILE = LOG_DIR / "forecasts.db"
-
-# Kept for any migration tooling; no longer written by the miner
-FORECAST_LOG_FILE = LOG_DIR / "forecasts.jsonl"
+DATA_DIR.mkdir(parents=True, exist_ok=True)
 
 # ── Binance REST API ──────────────────────────────────────────────────────────
 BINANCE_BASE_URL = "https://api.binance.com"
