@@ -14,6 +14,11 @@ LOG_DIR = Path(
     or Path.home() / ".precog_baseline"
 )
 LOG_DIR.mkdir(parents=True, exist_ok=True)
+
+# SQLite database — all forecast data, Binance snapshots, and CM snapshots
+DB_FILE = LOG_DIR / "forecasts.db"
+
+# Kept for any migration tooling; no longer written by the miner
 FORECAST_LOG_FILE = LOG_DIR / "forecasts.jsonl"
 
 # ── Binance REST API ──────────────────────────────────────────────────────────
