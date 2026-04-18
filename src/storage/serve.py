@@ -29,6 +29,7 @@ _SERVING_COLS = [
     "cm_spot",
     "realized_price_1h", "realized_min_1h", "realized_max_1h",
     "ape", "interval_score",
+    "latency_binance_ms", "latency_cm_ms", "latency_forward_ms",
 ]
 
 

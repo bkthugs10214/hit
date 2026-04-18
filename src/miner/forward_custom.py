@@ -27,6 +27,8 @@ Fallback chain
 2. CoinMetrics cm client    (fallback — needs CM_API_KEY in env)
 3. Skip the asset           (better to omit than to return garbage)
 """
+import time
+
 import bittensor as bt
 
 from precog_baseline_miner.config import (
@@ -75,17 +77,19 @@ async def forward(synapse, cm):
 
         # ── Primary path: Binance ─────────────────────────────────────────────
         try:
-            candles = fetch_candles(asset, limit=DEFAULT_CANDLE_LIMIT)
+            _asset_t0 = time.perf_counter()
+
+            candles, b_latency_ms = fetch_candles(asset, limit=DEFAULT_CANDLE_LIMIT)
             spot  = float(candles["close"].iloc[-1])
             point = compute_point_forecast(candles, shrinkage=POINT_SHRINKAGE)
             lo, hi = compute_interval(candles, point, multiplier=INTERVAL_MULTIPLIER)
 
             b_snap = binance_snapshot(candles)
 
-            # Fetch CoinMetrics reference rates in parallel for logging —
-            # failures here never block the forecast from being returned.
+            # Fetch CoinMetrics reference rates — failures never block the forecast.
+            cm_latency_ms: float | None = None
             try:
-                cm_df  = fetch_reference_rates(asset, frequency="1m", lookback_hours=1)
+                cm_df, cm_latency_ms = fetch_reference_rates(asset, frequency="1m", lookback_hours=1)
                 c_snap = cm_snapshot(cm_df)
             except Exception as cm_exc:
                 bt.logging.debug(f"[baseline] CM data unavailable for '{asset}': {cm_exc}")
@@ -93,6 +97,8 @@ async def forward(synapse, cm):
 
             predictions[asset] = round(point, 4)
             intervals[asset]   = [round(lo, 4), round(hi, 4)]
+
+            forward_ms = round((time.perf_counter() - _asset_t0) * 1000, 1)
 
             log_forecast(
                 asset=asset,
@@ -103,11 +109,17 @@ async def forward(synapse, cm):
                 high=hi,
                 binance_snap=b_snap,
                 cm_snap=c_snap,
+                latency_binance_ms=b_latency_ms,
+                latency_cm_ms=cm_latency_ms,
+                latency_forward_ms=forward_ms,
             )
 
             bt.logging.info(
                 f"[baseline] {asset}: spot=${spot:.2f}  "
-                f"point=${point:.2f}  interval=[${lo:.2f}, ${hi:.2f}]"
+                f"point=${point:.2f}  interval=[${lo:.2f}, ${hi:.2f}]  "
+                f"latency=binance:{b_latency_ms:.0f}ms"
+                + (f" cm:{cm_latency_ms:.0f}ms" if cm_latency_ms is not None else "")
+                + f" total:{forward_ms:.0f}ms"
             )
             continue  # success — move to next asset
 

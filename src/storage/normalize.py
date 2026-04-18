@@ -28,12 +28,14 @@ _FORECAST_COLS = [
     "b_rvol_1m", "b_volume_60m", "b_vwap_60m", "b_n_candles",
     "cm_available", "cm_spot", "cm_ret_1h", "cm_rvol_1m",
     "cm_n_obs", "cm_frequency", "cm_source",
+    "latency_binance_ms", "latency_cm_ms", "latency_forward_ms",
 ]
 
 _REALIZATION_COLS = [
     "ingested_at", "prediction_ts", "asset",
     "realized_price_1h", "realized_min_1h", "realized_max_1h",
     "ape", "interval_score",
+    "latency_binance_ms",
 ]
 
 
@@ -84,6 +86,9 @@ def normalize_forecasts(data_dir: Path) -> int:
             "cm_n_obs":      p.get("cm_n_obs"),
             "cm_frequency":  p.get("cm_frequency"),
             "cm_source":     p.get("cm_source"),
+            "latency_binance_ms":  p.get("latency_binance_ms"),
+            "latency_cm_ms":       p.get("latency_cm_ms"),
+            "latency_forward_ms":  p.get("latency_forward_ms"),
         })
 
     if not rows:
@@ -121,6 +126,7 @@ def normalize_realizations(data_dir: Path) -> int:
             "realized_max_1h":    p.get("realized_max_1h"),
             "ape":                p.get("ape"),
             "interval_score":     p.get("interval_score"),
+            "latency_binance_ms": p.get("latency_binance_ms"),
         })
 
     if not rows:

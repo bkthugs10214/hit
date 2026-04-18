@@ -15,6 +15,7 @@ Usage (after pip install -e .):
 """
 import logging
 import sys
+import time
 
 # ── Allow running as `python src/main.py` (before pip install) ───────────────
 # When installed via `pip install -e .`, the imports below work automatically.
@@ -58,27 +59,37 @@ def run_once() -> bool:
 
     for asset in assets:
         try:
-            candles = fetch_candles(asset, limit=100)
+            _t0 = time.perf_counter()
+
+            candles, b_latency_ms = fetch_candles(asset, limit=100)
             spot  = float(candles["close"].iloc[-1])
             point = compute_point_forecast(candles)
             lo, hi = compute_interval(candles, point)
             b_snap = binance_snapshot(candles)
 
             # CoinMetrics — best-effort, never blocks the forecast
+            cm_latency_ms: float | None = None
             try:
-                cm_df  = fetch_reference_rates(asset, frequency="1m", lookback_hours=1)
+                cm_df, cm_latency_ms = fetch_reference_rates(asset, frequency="1m", lookback_hours=1)
                 c_snap = cm_snapshot(cm_df)
                 cm_spot_str = f"  cm_spot=${c_snap['cm_spot']:>12,.2f}" if c_snap.get("cm_spot") else "  cm_spot=unavailable"
             except Exception as cm_exc:
                 c_snap = {"available": False}
                 cm_spot_str = f"  cm_spot=error({cm_exc.__class__.__name__})"
 
+            forward_ms = round((time.perf_counter() - _t0) * 1000, 1)
+            latency_str = (
+                f"  binance:{b_latency_ms:.0f}ms"
+                + (f"  cm:{cm_latency_ms:.0f}ms" if cm_latency_ms is not None else "")
+                + f"  total:{forward_ms:.0f}ms"
+            )
+
             print(
                 f"  {asset:<20}  "
                 f"spot=${spot:>12,.2f}{cm_spot_str}  "
                 f"point=${point:>12,.2f}  "
                 f"interval=[${lo:>12,.2f}, ${hi:>12,.2f}]  "
-                f"width={100*(hi-lo)/point:.2f}%"
+                f"width={100*(hi-lo)/point:.2f}%{latency_str}"
             )
 
             log_forecast(
@@ -90,6 +101,9 @@ def run_once() -> bool:
                 high=hi,
                 binance_snap=b_snap,
                 cm_snap=c_snap,
+                latency_binance_ms=b_latency_ms,
+                latency_cm_ms=cm_latency_ms,
+                latency_forward_ms=forward_ms,
             )
             any_success = True
 

@@ -19,6 +19,7 @@ Response format from GET /timeseries/asset-metrics:
 """
 import logging
 import os
+import time
 from datetime import datetime, timedelta, timezone
 
 import pandas as pd
@@ -47,7 +48,7 @@ def fetch_reference_rates(
     asset: str,
     frequency: str = "1m",
     lookback_hours: int = 1,
-) -> pd.DataFrame:
+) -> tuple[pd.DataFrame, float]:
     """
     Fetch CoinMetrics ReferenceRateUSD for one asset.
 
@@ -58,8 +59,9 @@ def fetch_reference_rates(
         lookback_hours: how many hours of history to fetch (default 1).
 
     Returns:
-        DataFrame with columns ["time" (UTC datetime), "ReferenceRateUSD" (float)].
-        Empty DataFrame if the asset is not in CM_ASSET_MAP or the API call fails.
+        (df, latency_ms) where df has columns ["time" (UTC datetime),
+        "ReferenceRateUSD" (float)] and latency_ms is the round-trip time
+        for the API call in milliseconds.
 
     Raises:
         KeyError:           if asset has no CoinMetrics mapping.
@@ -87,18 +89,20 @@ def fetch_reference_rates(
     url = _base_url() + _METRICS_PATH
     logger.debug("Fetching CM reference rates: asset=%s freq=%s", cm_asset, frequency)
 
+    _t0 = time.perf_counter()
     resp = requests.get(url, params=params, timeout=_REQUEST_TIMEOUT)
+    latency_ms = round((time.perf_counter() - _t0) * 1000, 1)
     resp.raise_for_status()
 
     rows = resp.json().get("data", [])
     if not rows:
         logger.warning("CoinMetrics returned 0 rows for asset=%s", cm_asset)
-        return _empty_rates_df()
+        return _empty_rates_df(), latency_ms
 
     df = pd.DataFrame(rows)
     df["time"] = pd.to_datetime(df["time"], utc=True)
     df["ReferenceRateUSD"] = pd.to_numeric(df["ReferenceRateUSD"], errors="coerce")
-    return df[["time", "ReferenceRateUSD"]].dropna().reset_index(drop=True)
+    return df[["time", "ReferenceRateUSD"]].dropna().reset_index(drop=True), latency_ms
 
 
 def cm_snapshot(df: pd.DataFrame) -> dict:

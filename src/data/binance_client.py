@@ -9,6 +9,7 @@ Binance klines docs:
   https://binance-docs.github.io/apidocs/spot/en/#kline-candlestick-data
 """
 import logging
+import time
 
 import pandas as pd
 import requests
@@ -46,7 +47,7 @@ def fetch_candles(
     limit: int = 100,
     start_ms: int | None = None,
     end_ms: int | None = None,
-) -> pd.DataFrame:
+) -> tuple[pd.DataFrame, float]:
     """
     Fetch OHLCV candles for a Precog asset from Binance.
 
@@ -59,9 +60,9 @@ def fetch_candles(
         end_ms:   Optional end time in Unix milliseconds.
 
     Returns:
-        DataFrame with columns: open_time (UTC), open, high, low, close, volume.
-        All price/volume columns are float64.
-        open_time is a timezone-aware UTC datetime.
+        (df, latency_ms) where df has columns: open_time (UTC), open, high,
+        low, close, volume (all float64) and latency_ms is the round-trip
+        time for the API call in milliseconds.
 
     Raises:
         KeyError:              if `asset` is not in ASSET_SYMBOL_MAP.
@@ -76,17 +77,19 @@ def fetch_candles(
         params["endTime"] = end_ms
 
     logger.debug("Fetching %d x %s candles for %s", limit, interval, symbol)
+    _t0 = time.perf_counter()
     response = requests.get(
         _KLINES_ENDPOINT,
         params=params,
         timeout=BINANCE_REQUEST_TIMEOUT,
     )
+    latency_ms = round((time.perf_counter() - _t0) * 1000, 1)
     response.raise_for_status()
 
     raw = response.json()
     if not raw:
         logger.warning("Binance returned 0 candles for %s", symbol)
-        return _empty_candle_df()
+        return _empty_candle_df(), latency_ms
 
     df = pd.DataFrame(raw, columns=_KLINE_COLUMNS)
 
@@ -95,7 +98,7 @@ def fetch_candles(
 
     df["open_time"] = pd.to_datetime(df["open_time"], unit="ms", utc=True)
 
-    return df[_KEEP_COLS].copy()
+    return df[_KEEP_COLS].copy(), latency_ms
 
 
 def _empty_candle_df() -> pd.DataFrame:

@@ -9,6 +9,7 @@ After recording, call storage.serve.run_pipeline(DATA_DIR) to push data
 through the normalization + serving layers.
 """
 import logging
+import time
 from datetime import datetime, timedelta, timezone
 
 from precog_baseline_miner.config import DATA_DIR
@@ -28,9 +29,18 @@ def log_forecast(
     high: float,
     binance_snap: dict | None = None,
     cm_snap: dict | None = None,
+    *,
+    latency_binance_ms: float | None = None,
+    latency_cm_ms: float | None = None,
+    latency_forward_ms: float | None = None,
 ) -> None:
     """
     Append one forecast event to the raw archive.
+
+    Latency args (keyword-only):
+        latency_binance_ms  — Binance klines round-trip time in ms
+        latency_cm_ms       — CoinMetrics reference-rates round-trip time in ms
+        latency_forward_ms  — total per-asset forward turnaround time in ms
 
     Silently swallows errors so a storage failure never crashes the forward
     function.
@@ -61,6 +71,10 @@ def log_forecast(
         "cm_n_obs":      c.get("n_observations"),
         "cm_frequency":  c.get("frequency"),
         "cm_source":     c.get("source"),
+        # Latency telemetry
+        "latency_binance_ms":  latency_binance_ms,
+        "latency_cm_ms":       latency_cm_ms,
+        "latency_forward_ms":  latency_forward_ms,
     }
 
     try:
@@ -113,7 +127,7 @@ def fill_realized() -> int:
             start_ms = int(pred_ts.timestamp() * 1000)
             end_ms   = int(eval_ts.timestamp() * 1000)
 
-            candles = fetch_candles(
+            candles, b_latency_ms = fetch_candles(
                 asset,
                 interval="1m",
                 limit=65,
@@ -140,6 +154,7 @@ def fill_realized() -> int:
                     forecast["low"], forecast["high"],
                     realized_min, realized_max,
                 ),
+                "latency_binance_ms": b_latency_ms,
             }
             archive.write_event(DATA_DIR, "precog", "realizations", asset, realization)
             updated += 1
