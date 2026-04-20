@@ -26,9 +26,12 @@ _root = _os.path.dirname(_here)
 if _root not in sys.path:
     sys.path.insert(0, _root)
 
-from precog_baseline_miner.config import FORECAST_LOG_FILE
+from precog_baseline_miner.config import FORECAST_LOG_FILE, SENTIMENT_LOG_FILE, SENTIMENT_WEIGHT
 from precog_baseline_miner.data.binance_client import fetch_candles
+from precog_baseline_miner.data.sentiment import fetch_all_sentiment
 from precog_baseline_miner.eval.recorder import fill_realized, log_forecast
+from precog_baseline_miner.eval.sentiment_recorder import log_sentiment
+from precog_baseline_miner.features.sentiment import sentiment_signal
 from precog_baseline_miner.forecast.baseline import compute_point_forecast
 from precog_baseline_miner.forecast.interval import compute_interval
 from precog_baseline_miner.miner.adapter import ASSET_SYMBOL_MAP
@@ -58,15 +61,35 @@ def run_once() -> bool:
         try:
             candles = fetch_candles(asset, limit=100)
             spot = float(candles["close"].iloc[-1])
-            point = compute_point_forecast(candles)
+
+            bundle = fetch_all_sentiment(asset)
+            signal = sentiment_signal(bundle)
+            log_sentiment(asset, bundle, signal)
+
+            point = compute_point_forecast(
+                candles,
+                sentiment=signal,
+                sentiment_weight=SENTIMENT_WEIGHT,
+            )
             lo, hi = compute_interval(candles, point)
+
+            fg_str = (
+                f"F&G={bundle.fear_greed.value}({bundle.fear_greed.classification})"
+                if bundle.fear_greed else "F&G=N/A"
+            )
+            cp_str = (
+                f"CP={bundle.cryptopanic.score:+.3f}"
+                if bundle.cryptopanic else "CP=N/A"
+            )
+            sig_str = f"signal={signal:+.3f}" if signal is not None else "signal=N/A"
 
             print(
                 f"  {asset:<20}  "
                 f"spot=${spot:>12,.2f}  "
                 f"point=${point:>12,.2f}  "
                 f"interval=[${lo:>12,.2f}, ${hi:>12,.2f}]  "
-                f"width={100*(hi-lo)/point:.2f}%"
+                f"width={100*(hi-lo)/point:.2f}%  "
+                f"{fg_str}  {cp_str}  {sig_str}"
             )
 
             log_forecast(
@@ -83,7 +106,8 @@ def run_once() -> bool:
             logger.error("  %-20s  FAILED: %s", asset, exc)
 
     print()
-    print(f"Forecast log: {FORECAST_LOG_FILE}")
+    print(f"Forecast log:  {FORECAST_LOG_FILE}")
+    print(f"Sentiment log: {SENTIMENT_LOG_FILE}")
 
     # Try to fill any past forecasts whose 1-hour horizon has passed
     filled = fill_realized()

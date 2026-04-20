@@ -33,9 +33,13 @@ from precog_baseline_miner.config import (
     DEFAULT_CANDLE_LIMIT,
     INTERVAL_MULTIPLIER,
     POINT_SHRINKAGE,
+    SENTIMENT_WEIGHT,
 )
 from precog_baseline_miner.data.binance_client import fetch_candles
+from precog_baseline_miner.data.sentiment import fetch_all_sentiment
 from precog_baseline_miner.eval.recorder import log_forecast
+from precog_baseline_miner.eval.sentiment_recorder import log_sentiment
+from precog_baseline_miner.features.sentiment import sentiment_signal
 from precog_baseline_miner.forecast.baseline import compute_point_forecast
 from precog_baseline_miner.forecast.interval import compute_interval
 from precog_baseline_miner.miner.adapter import ASSET_SYMBOL_MAP, cm_fallback
@@ -75,7 +79,18 @@ async def forward(synapse, cm):
         try:
             candles = fetch_candles(asset, limit=DEFAULT_CANDLE_LIMIT)
             spot = float(candles["close"].iloc[-1])
-            point = compute_point_forecast(candles, shrinkage=POINT_SHRINKAGE)
+
+            # Fetch sentiment; failures are non-fatal (signal → None)
+            bundle = fetch_all_sentiment(asset)
+            signal = sentiment_signal(bundle)
+            log_sentiment(asset, bundle, signal)
+
+            point = compute_point_forecast(
+                candles,
+                shrinkage=POINT_SHRINKAGE,
+                sentiment=signal,
+                sentiment_weight=SENTIMENT_WEIGHT,
+            )
             lo, hi = compute_interval(candles, point, multiplier=INTERVAL_MULTIPLIER)
 
             predictions[asset] = round(point, 4)
