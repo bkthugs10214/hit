@@ -31,6 +31,7 @@ import bittensor as bt
 
 from precog_baseline_miner.config import (
     DEFAULT_CANDLE_LIMIT,
+    FUTURES_WEIGHT,
     INTERVAL_MULTIPLIER,
     IS_MAINNET,
     MIN_BALANCE_TAO,
@@ -39,9 +40,12 @@ from precog_baseline_miner.config import (
     SENTIMENT_WEIGHT,
 )
 from precog_baseline_miner.data.binance_client import fetch_candles
+from precog_baseline_miner.data.futures import fetch_all_futures
 from precog_baseline_miner.data.sentiment import fetch_all_sentiment
+from precog_baseline_miner.eval.futures_recorder import log_futures
 from precog_baseline_miner.eval.recorder import log_forecast
 from precog_baseline_miner.eval.sentiment_recorder import log_sentiment
+from precog_baseline_miner.features.futures import futures_signal
 from precog_baseline_miner.features.sentiment import sentiment_signal
 from precog_baseline_miner.forecast.baseline import compute_point_forecast
 from precog_baseline_miner.forecast.interval import compute_interval
@@ -87,16 +91,22 @@ async def forward(synapse, cm):
             candles = fetch_candles(asset, limit=DEFAULT_CANDLE_LIMIT)
             spot = float(candles["close"].iloc[-1])
 
-            # Fetch sentiment; failures are non-fatal (signal → None)
-            bundle = fetch_all_sentiment(asset)
-            signal = sentiment_signal(bundle)
-            log_sentiment(asset, bundle, signal)
+            # Fetch sentiment and futures; failures are non-fatal (signal → None)
+            sent_bundle = fetch_all_sentiment(asset)
+            sent_sig = sentiment_signal(sent_bundle)
+            log_sentiment(asset, sent_bundle, sent_sig)
+
+            fut_bundle = fetch_all_futures(asset)
+            fut_sig = futures_signal(fut_bundle)
+            log_futures(asset, fut_bundle, fut_sig)
 
             point = compute_point_forecast(
                 candles,
                 shrinkage=POINT_SHRINKAGE,
-                sentiment=signal,
+                sentiment=sent_sig,
                 sentiment_weight=SENTIMENT_WEIGHT,
+                futures=fut_sig,
+                futures_weight=FUTURES_WEIGHT,
             )
             lo, hi = compute_interval(candles, point, multiplier=INTERVAL_MULTIPLIER)
 

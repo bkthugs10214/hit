@@ -19,6 +19,7 @@ packages = ["precog_baseline_miner"] + [
 ]
 # Nested sub-packages registered separately (dot-name ≠ slash-path)
 packages.append("precog_baseline_miner.data.sentiment")
+packages.append("precog_baseline_miner.data.futures")
 
 package_dir = {"precog_baseline_miner": "src"}
 package_dir.update({
@@ -26,6 +27,7 @@ package_dir.update({
     for sub in SUBPACKAGES
 })
 package_dir["precog_baseline_miner.data.sentiment"] = "src/data/sentiment"
+package_dir["precog_baseline_miner.data.futures"] = "src/data/futures"
 
 setup(
     name="precog-baseline-miner",

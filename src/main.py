@@ -26,11 +26,20 @@ _root = _os.path.dirname(_here)
 if _root not in sys.path:
     sys.path.insert(0, _root)
 
-from precog_baseline_miner.config import FORECAST_LOG_FILE, SENTIMENT_LOG_FILE, SENTIMENT_WEIGHT
+from precog_baseline_miner.config import (
+    FORECAST_LOG_FILE,
+    FUTURES_LOG_FILE,
+    FUTURES_WEIGHT,
+    SENTIMENT_LOG_FILE,
+    SENTIMENT_WEIGHT,
+)
 from precog_baseline_miner.data.binance_client import fetch_candles
+from precog_baseline_miner.data.futures import fetch_all_futures
 from precog_baseline_miner.data.sentiment import fetch_all_sentiment
+from precog_baseline_miner.eval.futures_recorder import log_futures
 from precog_baseline_miner.eval.recorder import fill_realized, log_forecast
 from precog_baseline_miner.eval.sentiment_recorder import log_sentiment
+from precog_baseline_miner.features.futures import futures_signal
 from precog_baseline_miner.features.sentiment import sentiment_signal
 from precog_baseline_miner.forecast.baseline import compute_point_forecast
 from precog_baseline_miner.forecast.interval import compute_interval
@@ -62,26 +71,33 @@ def run_once() -> bool:
             candles = fetch_candles(asset, limit=100)
             spot = float(candles["close"].iloc[-1])
 
-            bundle = fetch_all_sentiment(asset)
-            signal = sentiment_signal(bundle)
-            log_sentiment(asset, bundle, signal)
+            sent_bundle = fetch_all_sentiment(asset)
+            sent_sig = sentiment_signal(sent_bundle)
+            log_sentiment(asset, sent_bundle, sent_sig)
+
+            fut_bundle = fetch_all_futures(asset)
+            fut_sig = futures_signal(fut_bundle)
+            log_futures(asset, fut_bundle, fut_sig)
 
             point = compute_point_forecast(
                 candles,
-                sentiment=signal,
+                sentiment=sent_sig,
                 sentiment_weight=SENTIMENT_WEIGHT,
+                futures=fut_sig,
+                futures_weight=FUTURES_WEIGHT,
             )
             lo, hi = compute_interval(candles, point)
 
             fg_str = (
-                f"F&G={bundle.fear_greed.value}({bundle.fear_greed.classification})"
-                if bundle.fear_greed else "F&G=N/A"
+                f"F&G={sent_bundle.fear_greed.value}({sent_bundle.fear_greed.classification})"
+                if sent_bundle.fear_greed else "F&G=N/A"
             )
-            cp_str = (
-                f"CP={bundle.cryptopanic.score:+.3f}"
-                if bundle.cryptopanic else "CP=N/A"
+            fund_str = (
+                f"funding={fut_bundle.mexc.funding_rate:+.6f}"
+                if fut_bundle.mexc else "funding=N/A"
             )
-            sig_str = f"signal={signal:+.3f}" if signal is not None else "signal=N/A"
+            fut_sig_str = f"fut={fut_sig:+.3f}" if fut_sig is not None else "fut=N/A"
+            sent_sig_str = f"sent={sent_sig:+.3f}" if sent_sig is not None else "sent=N/A"
 
             print(
                 f"  {asset:<20}  "
@@ -89,7 +105,7 @@ def run_once() -> bool:
                 f"point=${point:>12,.2f}  "
                 f"interval=[${lo:>12,.2f}, ${hi:>12,.2f}]  "
                 f"width={100*(hi-lo)/point:.2f}%  "
-                f"{fg_str}  {cp_str}  {sig_str}"
+                f"{fg_str}  {fund_str}  {sent_sig_str}  {fut_sig_str}"
             )
 
             log_forecast(
@@ -108,6 +124,7 @@ def run_once() -> bool:
     print()
     print(f"Forecast log:  {FORECAST_LOG_FILE}")
     print(f"Sentiment log: {SENTIMENT_LOG_FILE}")
+    print(f"Futures log:   {FUTURES_LOG_FILE}")
 
     # Try to fill any past forecasts whose 1-hour horizon has passed
     filled = fill_realized()

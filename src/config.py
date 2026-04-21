@@ -27,6 +27,15 @@ MEXC_BASE_URL = os.environ.get("MEXC_BASE_URL", "https://api.mexc.com")
 # Seconds before giving up on a candle request (applies to both exchanges).
 BINANCE_REQUEST_TIMEOUT = int(os.environ.get("BINANCE_TIMEOUT", "10"))
 
+# ── Futures data (MEXC perpetual contracts) ───────────────────────────────────
+# MEXC futures are accessible from the US where Binance/Bybit futures are blocked.
+MEXC_FUTURES_BASE_URL = os.environ.get("MEXC_FUTURES_BASE_URL", "https://contract.mexc.com")
+# Seconds to cache futures ticker per asset before re-fetching.
+FUTURES_CACHE_TTL = int(os.environ.get("FUTURES_CACHE_TTL", "60"))
+# Weight of futures signal in point forecast drift blend [0, 1].
+FUTURES_WEIGHT = float(os.environ.get("FUTURES_WEIGHT", "0.10"))
+FUTURES_LOG_FILE = LOG_DIR / "futures.jsonl"
+
 # ── Candle defaults ───────────────────────────────────────────────────────────
 DEFAULT_CANDLE_INTERVAL = "1m"
 # 100 x 1-min candles = ~100 minutes of history (enough for 5m + 15m returns
