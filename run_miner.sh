@@ -34,11 +34,14 @@ if [[ ! -f "$ENV_FILE" ]]; then
     exit 1
 fi
 
-# Load env vars (skip comment lines and blank lines)
-set -a
-# shellcheck disable=SC1090
-source <(grep -v '^\s*#' "$ENV_FILE" | grep -v '^\s*$')
-set +a
+# Load env vars from file as defaults — env vars already in the environment take priority.
+while IFS='=' read -r _key _value; do
+    _key="${_key// /}"  # trim whitespace
+    # Only set if not already exported by the calling environment
+    [[ -n "$_key" ]] && [[ "$_key" =~ ^[A-Z_][A-Z0-9_]*$ ]] && \
+        ! printenv "$_key" > /dev/null 2>&1 && \
+        export "$_key=$_value"
+done < <(grep -v '^\s*#' "$ENV_FILE" | grep -v '^\s*$' | grep '=')
 
 # ── Defaults for risk vars (may not be in older env files) ───────────────────
 NETWORK="${NETWORK:-testnet}"
