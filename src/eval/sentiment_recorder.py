@@ -16,6 +16,8 @@ Record schema
   "fear_greed_class":  "Greed",
   "cryptopanic_score": 0.41,
   "cp_article_count":  12,
+  "reddit_score":      0.18,
+  "reddit_post_count": 25,
   "combined_signal":   0.37,
   "cache_hit":         false
 }
@@ -46,6 +48,7 @@ def log_sentiment(
     """
     fg = bundle.fear_greed
     cp = bundle.cryptopanic
+    rd = bundle.reddit
 
     record = {
         "logged_at": datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%S.%f") + "Z",
@@ -54,8 +57,10 @@ def log_sentiment(
         "fear_greed_class": fg.classification if fg else None,
         "cryptopanic_score": round(cp.score, 4) if cp else None,
         "cp_article_count": cp.article_count if cp else None,
+        "reddit_score": round(rd.score, 4) if rd else None,
+        "reddit_post_count": rd.post_count if rd else None,
         "combined_signal": round(combined_signal, 4) if combined_signal is not None else None,
-        "cache_hit": fg.from_cache if fg else False,
+        "cache_hit": fg.from_cache if fg else (rd.from_cache if rd else False),
     }
 
     with _write_lock:

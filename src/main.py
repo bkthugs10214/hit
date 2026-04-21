@@ -92,6 +92,10 @@ def run_once() -> bool:
                 f"F&G={sent_bundle.fear_greed.value}({sent_bundle.fear_greed.classification})"
                 if sent_bundle.fear_greed else "F&G=N/A"
             )
+            rd_str = (
+                f"Reddit={sent_bundle.reddit.score:+.3f}({sent_bundle.reddit.post_count}p)"
+                if sent_bundle.reddit else "Reddit=N/A"
+            )
             fund_str = (
                 f"funding={fut_bundle.mexc.funding_rate:+.6f}"
                 if fut_bundle.mexc else "funding=N/A"
@@ -105,7 +109,7 @@ def run_once() -> bool:
                 f"point=${point:>12,.2f}  "
                 f"interval=[${lo:>12,.2f}, ${hi:>12,.2f}]  "
                 f"width={100*(hi-lo)/point:.2f}%  "
-                f"{fg_str}  {fund_str}  {sent_sig_str}  {fut_sig_str}"
+                f"{fg_str}  {rd_str}  {fund_str}  {sent_sig_str}  {fut_sig_str}"
             )
 
             log_forecast(
