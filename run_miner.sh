@@ -63,6 +63,23 @@ echo "  Min balance : ${MIN_BALANCE_TAO} τ"
 echo "  Make it rain: $MAKE_IT_RAIN"
 echo ""
 
+# ── btcli version check ───────────────────────────────────────────────────────
+_BTCLI_PIN_FILE="$(dirname "$0")/.btcli-version"
+if [[ -f "$_BTCLI_PIN_FILE" ]]; then
+    _PINNED_VER=$(cat "$_BTCLI_PIN_FILE")
+    _ACTUAL_VER=$(btcli --version 2>/dev/null | grep -oE '[0-9]+\.[0-9]+\.[0-9]+' | head -1 || echo "unknown")
+    if [[ "$_ACTUAL_VER" != "$_PINNED_VER" ]]; then
+        echo "⚠️  btcli version mismatch: installed=$_ACTUAL_VER pinned=$_PINNED_VER"
+        echo "   Re-run deploy.sh to install the correct version."
+        if [[ "$RISK_LIMITS_ENABLED" == "1" ]]; then
+            exit 1
+        fi
+    else
+        echo "  ✓ btcli $_ACTUAL_VER (matches pinned)"
+    fi
+fi
+echo ""
+
 # ── Risk: mainnet confirmation ────────────────────────────────────────────────
 if [[ "$NETWORK" == "finney" ]]; then
     if [[ "$MAKE_IT_RAIN" == "true" ]]; then
