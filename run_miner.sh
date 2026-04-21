@@ -6,7 +6,7 @@
 #   ./run_miner.sh --make_it_rain      # skips mainnet confirmation, no prompts
 #
 # Environment:
-#   PRECOG_DIR   path to the Precog subnet repo (default: ~/precog)
+#   PRECOG_DIR   path to the Precog subnet repo (default: ~/precog-node)
 #   ENV_FILE     path to the .env.miner file (default: $PRECOG_DIR/.env.miner)
 #
 # Risk controls read from ENV_FILE:
@@ -25,7 +25,7 @@ for arg in "$@"; do
 done
 
 # ── Locate env file ───────────────────────────────────────────────────────────
-PRECOG_DIR="${PRECOG_DIR:-$HOME/precog}"
+PRECOG_DIR="${PRECOG_DIR:-$HOME/precog-node}"
 ENV_FILE="${ENV_FILE:-$PRECOG_DIR/.env.miner}"
 
 if [[ ! -f "$ENV_FILE" ]]; then
