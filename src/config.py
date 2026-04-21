@@ -16,9 +16,15 @@ LOG_DIR = Path(
 LOG_DIR.mkdir(parents=True, exist_ok=True)
 FORECAST_LOG_FILE = LOG_DIR / "forecasts.jsonl"
 
-# ── Binance REST API ──────────────────────────────────────────────────────────
+# ── Candle exchanges ─────────────────────────────────────────────────────────
+# Primary exchange. US users: set to https://api.binance.us (TAO not listed there).
+# Leave blank for global api.binance.com.
 BINANCE_BASE_URL = os.environ.get("BINANCE_BASE_URL", "https://api.binance.com")
-# Seconds before giving up on a Binance request
+# Secondary exchange: MEXC uses the identical Binance klines API format.
+# Used automatically when the primary exchange returns "Invalid symbol" for an asset.
+# TAO is available on MEXC even when using Binance.US as primary.
+MEXC_BASE_URL = os.environ.get("MEXC_BASE_URL", "https://api.mexc.com")
+# Seconds before giving up on a candle request (applies to both exchanges).
 BINANCE_REQUEST_TIMEOUT = int(os.environ.get("BINANCE_TIMEOUT", "10"))
 
 # ── Candle defaults ───────────────────────────────────────────────────────────
