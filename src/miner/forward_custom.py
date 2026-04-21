@@ -32,7 +32,10 @@ import bittensor as bt
 from precog_baseline_miner.config import (
     DEFAULT_CANDLE_LIMIT,
     INTERVAL_MULTIPLIER,
+    IS_MAINNET,
+    MIN_BALANCE_TAO,
     POINT_SHRINKAGE,
+    RISK_LIMITS_ENABLED,
     SENTIMENT_WEIGHT,
 )
 from precog_baseline_miner.data.binance_client import fetch_candles
@@ -43,6 +46,10 @@ from precog_baseline_miner.features.sentiment import sentiment_signal
 from precog_baseline_miner.forecast.baseline import compute_point_forecast
 from precog_baseline_miner.forecast.interval import compute_interval
 from precog_baseline_miner.miner.adapter import ASSET_SYMBOL_MAP, cm_fallback
+from precog_baseline_miner.risk.guards import startup_risk_check
+
+# Run once at import time — surfaces network + risk config in pm2 logs.
+startup_risk_check(IS_MAINNET, RISK_LIMITS_ENABLED, MIN_BALANCE_TAO)
 
 # Fixed fallback margin when everything else fails: ±2% around latest price
 _HARD_FALLBACK_MARGIN_PCT = 0.02

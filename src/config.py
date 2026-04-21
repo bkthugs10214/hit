@@ -53,3 +53,18 @@ SENTIMENT_LOG_FILE = LOG_DIR / "sentiment.jsonl"
 # ── Verbose logging ───────────────────────────────────────────────────────────
 # Set PRECOG_VERBOSE=1 to enable raw API payload logging in sentiment modules.
 VERBOSE = os.environ.get("PRECOG_VERBOSE", "0") == "1"
+
+# ── Network & deployment target ───────────────────────────────────────────────
+# testnet = free test TAO, safe to experiment.
+# finney  = Bittensor mainnet, real TAO.
+NETWORK = os.environ.get("NETWORK", "testnet")
+IS_MAINNET = NETWORK == "finney"
+
+# ── Risk limits ───────────────────────────────────────────────────────────────
+# Set RISK_LIMITS_ENABLED=0 to disable all pre-flight guards (not recommended on mainnet).
+RISK_LIMITS_ENABLED = os.environ.get("RISK_LIMITS_ENABLED", "1") == "1"
+# Miner refuses to start if coldkey balance is below this threshold.
+MIN_BALANCE_TAO = float(os.environ.get("MIN_BALANCE_TAO", "1.0"))
+# Wallet identifiers — used by run_miner.sh for balance checks.
+COLDKEY = os.environ.get("COLDKEY", "miner")
+MINER_HOTKEY = os.environ.get("MINER_HOTKEY", "default")
