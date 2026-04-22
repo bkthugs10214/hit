@@ -57,6 +57,13 @@ VPERMIT_TAO_LIMIT="${VPERMIT_TAO_LIMIT:-2}"
 FORWARD_FUNCTION="${FORWARD_FUNCTION:-baseline_miner}"
 LOGGING_LEVEL="${LOGGING_LEVEL:-info}"
 
+# Map LOGGING_LEVEL → bt.logging boolean flag (bt.logging ignores --logging.level)
+case "$LOGGING_LEVEL" in
+    trace) _BT_LOG_FLAG="--logging.trace" ;;
+    debug) _BT_LOG_FLAG="--logging.debug" ;;
+    *)     _BT_LOG_FLAG="--logging.info"  ;;
+esac
+
 # ── Network → chain endpoint + netuid ─────────────────────────────────────────
 case "$NETWORK" in
     testnet)  _CHAIN="wss://test.finney.opentensor.ai:443"; _NETUID=256 ;;
@@ -191,10 +198,11 @@ cd "$PRECOG_DIR"
 exec pm2 start \
     --name "$MINER_NAME" \
     --output "$OUT_LOG" \
-    --error  "$ERR_LOG" \
+    --error  "$OUT_LOG" \
     --log-date-format "YYYY-MM-DDTHH:mm:ss.SSS" \
+    --merge-logs \
     --no-autorestart \
-    "$_VENV/bin/python3" -- precog/miners/miner.py \
+    "$_VENV/bin/python3" -- -u precog/miners/miner.py \
         --neuron.name     "$MINER_NAME" \
         --wallet.name     "$COLDKEY" \
         --wallet.hotkey   "$MINER_HOTKEY" \
@@ -202,8 +210,7 @@ exec pm2 start \
         --axon.port       "$MINER_PORT" \
         --netuid          "$_NETUID" \
         --logging.level   "$LOGGING_LEVEL" \
-        --logging.record \
-        --logging.logging_dir "$LOG_DIR" \
+        "$_BT_LOG_FLAG" \
         --timeout         "$TIMEOUT" \
         --vpermit_tao_limit "$VPERMIT_TAO_LIMIT" \
         --forward_function "$FORWARD_FUNCTION"
