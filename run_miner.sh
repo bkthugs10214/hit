@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# run_miner.sh — pre-flight safety wrapper around "make miner"
+# run_miner.sh — pre-flight safety wrapper for the Precog baseline miner
 #
 # Usage:
 #   ./run_miner.sh                     # prompts for confirmation if NETWORK=finney
@@ -17,6 +17,8 @@
 #   MINER_HOTKEY         wallet hotkey name
 
 set -euo pipefail
+
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 
 # ── Parse flags ───────────────────────────────────────────────────────────────
 MAKE_IT_RAIN=false
@@ -37,34 +39,55 @@ fi
 # Load env vars from file as defaults — env vars already in the environment take priority.
 while IFS='=' read -r _key _value; do
     _key="${_key// /}"  # trim whitespace
-    # Only set if not already exported by the calling environment
     [[ -n "$_key" ]] && [[ "$_key" =~ ^[A-Z_][A-Z0-9_]*$ ]] && \
         ! printenv "$_key" > /dev/null 2>&1 && \
         export "$_key=$_value"
 done < <(grep -v '^\s*#' "$ENV_FILE" | grep -v '^\s*$' | grep '=')
 
-# ── Defaults for risk vars (may not be in older env files) ───────────────────
+# ── Defaults ──────────────────────────────────────────────────────────────────
 NETWORK="${NETWORK:-testnet}"
 RISK_LIMITS_ENABLED="${RISK_LIMITS_ENABLED:-1}"
 MIN_BALANCE_TAO="${MIN_BALANCE_TAO:-1.0}"
 COLDKEY="${COLDKEY:-miner}"
 MINER_HOTKEY="${MINER_HOTKEY:-default}"
+MINER_NAME="${MINER_NAME:-baseline-miner}"
+MINER_PORT="${MINER_PORT:-8092}"
+TIMEOUT="${TIMEOUT:-16}"
+VPERMIT_TAO_LIMIT="${VPERMIT_TAO_LIMIT:-2}"
+FORWARD_FUNCTION="${FORWARD_FUNCTION:-baseline_miner}"
+LOGGING_LEVEL="${LOGGING_LEVEL:-info}"
+
+# ── Network → chain endpoint + netuid ─────────────────────────────────────────
+case "$NETWORK" in
+    testnet)  _CHAIN="wss://test.finney.opentensor.ai:443"; _NETUID=256 ;;
+    finney)   _CHAIN="wss://entrypoint-finney.opentensor.ai:443"; _NETUID=55 ;;
+    localnet) _CHAIN="${LOCAL_SUBTENSOR:-ws://127.0.0.1:9945}"; _NETUID=55 ;;
+    *)        echo "ERROR: Unknown NETWORK=$NETWORK"; exit 1 ;;
+esac
+
+# ── Log directory setup ───────────────────────────────────────────────────────
+LOG_DIR="$SCRIPT_DIR/logs"
+mkdir -p "$LOG_DIR"
+RUN_TS=$(date -u +"%Y-%m-%dT%H-%M-%SZ")
+OUT_LOG="$LOG_DIR/${MINER_NAME}-${RUN_TS}-out.log"
+ERR_LOG="$LOG_DIR/${MINER_NAME}-${RUN_TS}-err.log"
 
 # ── Banner ────────────────────────────────────────────────────────────────────
 echo ""
 echo "╔══════════════════════════════════════════════════════════╗"
 echo "║          Precog Baseline Miner — Pre-flight Check        ║"
 echo "╚══════════════════════════════════════════════════════════╝"
-echo "  Network     : $NETWORK"
+echo "  Network     : $NETWORK (netuid $_NETUID)"
 echo "  Coldkey     : $COLDKEY"
 echo "  Hotkey      : $MINER_HOTKEY"
 echo "  Risk limits : $RISK_LIMITS_ENABLED"
 echo "  Min balance : ${MIN_BALANCE_TAO} τ"
 echo "  Make it rain: $MAKE_IT_RAIN"
+echo "  Log dir     : $LOG_DIR"
 echo ""
 
 # ── btcli version check ───────────────────────────────────────────────────────
-_BTCLI_PIN_FILE="$(dirname "$0")/.btcli-version"
+_BTCLI_PIN_FILE="$SCRIPT_DIR/.btcli-version"
 if [[ -f "$_BTCLI_PIN_FILE" ]]; then
     _PINNED_VER=$(cat "$_BTCLI_PIN_FILE")
     _ACTUAL_VER=$(btcli --version 2>/dev/null | grep -oE '[0-9]+\.[0-9]+\.[0-9]+' | head -1 || echo "unknown")
@@ -100,12 +123,10 @@ fi
 if [[ "$RISK_LIMITS_ENABLED" == "1" ]]; then
     if command -v btcli &>/dev/null; then
         echo "Checking wallet balance..."
-        # Fetch raw balance output and extract the τ value
         _balance_raw=$(btcli wallet balance \
             --wallet.name "$COLDKEY" \
             --subtensor.network "$NETWORK" 2>/dev/null || true)
 
-        # Parse the first τ value from the output (handles both old and new btcli formats)
         _balance=$(echo "$_balance_raw" \
             | grep -oE 'τ\s*[0-9]+(\.[0-9]+)?' \
             | head -1 \
@@ -114,10 +135,8 @@ if [[ "$RISK_LIMITS_ENABLED" == "1" ]]; then
         echo "  Coldkey balance: τ ${_balance}"
 
         if [[ "$_balance" != "unknown" ]]; then
-            # awk comparison: fail if balance < MIN_BALANCE_TAO
             _below=$(awk -v bal="$_balance" -v min="$MIN_BALANCE_TAO" \
                 'BEGIN { print (bal + 0 < min + 0) ? "yes" : "no" }')
-
             if [[ "$_below" == "yes" ]]; then
                 echo ""
                 echo "ERROR: Balance τ${_balance} is below MIN_BALANCE_TAO=${MIN_BALANCE_TAO}."
@@ -131,7 +150,6 @@ if [[ "$RISK_LIMITS_ENABLED" == "1" ]]; then
         fi
     else
         echo "  ⚠ btcli not found — skipping balance check."
-        echo "    Install with: pip install bittensor-cli"
     fi
 else
     echo "  Risk limits disabled (RISK_LIMITS_ENABLED=0) — skipping balance check."
@@ -145,18 +163,47 @@ if [[ ! -d "$PRECOG_DIR" ]]; then
     exit 1
 fi
 
-if [[ ! -f "$PRECOG_DIR/Makefile" ]]; then
-    echo ""
-    echo "ERROR: No Makefile found in $PRECOG_DIR — deploy may be incomplete."
-    echo "  Re-run deploy.sh."
-    exit 1
+# ── Activate venv ─────────────────────────────────────────────────────────────
+_VENV="$PRECOG_DIR/.venv"
+if [[ -f "$_VENV/bin/activate" ]]; then
+    # shellcheck disable=SC1091
+    source "$_VENV/bin/activate"
+    echo "  ✓ Activated venv: $_VENV"
+else
+    echo "  ⚠ No venv found at $_VENV — using system python3"
+fi
+
+# ── Stop any existing pm2 process ────────────────────────────────────────────
+# Always delete (not restart) so the new run gets its own timestamped log files.
+if pm2 describe "$MINER_NAME" &>/dev/null; then
+    echo "  Stopping existing pm2 process '$MINER_NAME'..."
+    pm2 delete "$MINER_NAME" 2>/dev/null || true
 fi
 
 # ── Start miner ───────────────────────────────────────────────────────────────
 echo ""
 echo "All checks passed. Starting miner..."
-echo "  cd $PRECOG_DIR && make miner ENV_FILE=$ENV_FILE"
+echo "  stdout → $OUT_LOG"
+echo "  stderr → $ERR_LOG"
 echo ""
 
 cd "$PRECOG_DIR"
-exec make miner ENV_FILE="$ENV_FILE"
+exec pm2 start \
+    --name "$MINER_NAME" \
+    --output "$OUT_LOG" \
+    --error  "$ERR_LOG" \
+    --log-date-format "YYYY-MM-DDTHH:mm:ss.SSS" \
+    --no-autorestart \
+    "$_VENV/bin/python3" -- precog/miners/miner.py \
+        --neuron.name     "$MINER_NAME" \
+        --wallet.name     "$COLDKEY" \
+        --wallet.hotkey   "$MINER_HOTKEY" \
+        --subtensor.chain_endpoint "$_CHAIN" \
+        --axon.port       "$MINER_PORT" \
+        --netuid          "$_NETUID" \
+        --logging.level   "$LOGGING_LEVEL" \
+        --logging.record \
+        --logging.logging_dir "$LOG_DIR" \
+        --timeout         "$TIMEOUT" \
+        --vpermit_tao_limit "$VPERMIT_TAO_LIMIT" \
+        --forward_function "$FORWARD_FUNCTION"

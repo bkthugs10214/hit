@@ -68,9 +68,13 @@ venv.bak/
 .DS_Store
 Thumbs.db
 
+# Runtime logs
+logs/
+
 # Secrets / credentials
 *.key
 *.pem
 secrets.json
 .env.local
 .env.*.local
+.env.miner

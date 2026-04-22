@@ -53,11 +53,35 @@ self.forward_module = importlib.import_module(f"precog.miners.{config.forward_fu
 synapse = await self.forward_module.forward(synapse, self.cm)
 ```
 
-Set `FORWARD_FUNCTION=baseline_miner` in your `.env.miner` to load our custom module.
+Set `FORWARD_FUNCTION=baseline_miner` in `.env.miner` to load our custom module.
+Our forward function lives at `src/miner/forward_custom.py` and is deployed to
+`~/precog-node/precog/miners/baseline_miner.py` by `deploy.sh`.
 
 ---
 
-## 3. CMData API (available as `cm` in forward function)
+## 3. Our Forward Function Pipeline (`src/miner/forward_custom.py`)
+
+Each validator call triggers this sequence per asset:
+
+```
+1. fetch_candles(asset, limit=100)          ← Binance 1-min OHLCV
+2. fetch_all_sentiment(asset)               ← Fear & Greed + CryptoPanic + Reddit
+3. sentiment_signal(bundle)                 ← normalize to [-1, 1]
+4. log_sentiment(asset, bundle, signal)     ← append to sentiment.jsonl
+5. fetch_all_futures(asset)                 ← MEXC funding rate + OI
+6. futures_signal(bundle)                   ← normalize to [-1, 1]
+7. log_futures(asset, bundle, signal)       ← append to futures.jsonl
+8. compute_point_forecast(candles, ...)     ← momentum + sentiment + futures blend
+9. compute_interval(candles, point)         ← realized vol half-width
+10. log_forecast(asset, ...)                ← append to forecasts.jsonl
+```
+
+If any upstream step fails, that signal is `None` and the forecast degrades
+gracefully to whatever data is available (minimum: Binance candles only).
+
+---
+
+## 4. CMData API (available as `cm` in forward function)
 
 **File:** `precog/utils/cm_data.py`
 
@@ -75,7 +99,7 @@ Our baseline uses Binance candles instead, so `cm` is only used as a fallback.
 
 ---
 
-## 4. Reward Functions
+## 5. Reward Functions
 
 **File:** `precog/validators/reward.py`
 
@@ -107,7 +131,7 @@ TASK_WEIGHTS = {
 
 ---
 
-## 5. Key Constants
+## 6. Key Constants
 
 | Constant | Value |
 |---|---|
@@ -117,10 +141,12 @@ TASK_WEIGHTS = {
 | Validator timeout | ~20 s (env default 16 s) |
 | Bittensor version | `^9.9.0` |
 | Python | `>=3.9, <3.12` |
+| Testnet netuid | 256 (NOT 50 — the Precog Makefile hardcodes 256 for testnet) |
+| Mainnet netuid | 55 |
 
 ---
 
-## 6. Timestamp Format
+## 7. Timestamp Format
 
 All timestamps use ISO 8601 with microseconds and Z suffix:
 ```
@@ -133,21 +159,29 @@ from precog.utils.timestamp import to_datetime, to_str, get_now, get_before, rou
 
 ---
 
-## 7. How to Run the Miner
+## 8. How to Run the Miner
 
 ```bash
-# Default (base_miner)
-make miner ENV_FILE=.env.miner
-
-# Custom forward function
-# 1. Place your module at precog/miners/my_module.py
-# 2. Set FORWARD_FUNCTION=my_module in .env.miner
-# 3. make miner ENV_FILE=.env.miner
+# Always use run_miner.sh — it runs pre-flight checks and manages logging
+PRECOG_DIR=~/precog-node ~/precog/hit/run_miner.sh
 ```
+
+Pre-flight checks:
+- btcli version matches `.btcli-version` pin
+- Coldkey balance >= `MIN_BALANCE_TAO`
+- Venv activated before pm2 launch
+- Deletes old pm2 process so each run gets fresh timestamped log files
+
+Logs are written to `~/precog/hit/logs/`:
+- `baseline-miner-<timestamp>-out.log` — bt.logging + forward function stdout
+- `baseline-miner-<timestamp>-err.log` — Python tracebacks
+- `baseline-miner-<timestamp>/` — bt.logging file output (`--logging.record`)
+
+pm2 is started with `--no-autorestart` — crashes require a manual `run_miner.sh` invocation to ensure a new log file is created.
 
 ---
 
-## 8. Minimum Viable Response
+## 9. Minimum Viable Response
 
 ```python
 # Absolute minimum to avoid being penalised as a non-responder:
@@ -161,3 +195,18 @@ Constraints:
 - `intervals[asset][0] < intervals[asset][1]` (low < high)
 - All values must be finite positive floats
 - Response must arrive within the validator timeout (~16–20 s)
+
+---
+
+## 10. Deployment Paths
+
+| Item | Path |
+|------|------|
+| This repo | `~/precog/hit` |
+| Precog upstream | `~/precog-node` |
+| Deployed forward function | `~/precog-node/precog/miners/baseline_miner.py` |
+| Miner env config | `~/precog-node/.env.miner` |
+| Forecast log | `~/.precog_baseline/forecasts.jsonl` |
+| Sentiment log | `~/.precog_baseline/sentiment.jsonl` |
+| Futures log | `~/.precog_baseline/futures.jsonl` |
+| Wallets | `~/.bittensor/wallets/miner/` |
