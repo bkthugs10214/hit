@@ -79,14 +79,15 @@ def run_once() -> bool:
             fut_sig = futures_signal(fut_bundle)
             log_futures(asset, fut_bundle, fut_sig)
 
-            point = compute_point_forecast(
+            fcst = compute_point_forecast(
                 candles,
                 sentiment=sent_sig,
                 sentiment_weight=SENTIMENT_WEIGHT,
                 futures=fut_sig,
                 futures_weight=FUTURES_WEIGHT,
             )
-            lo, hi = compute_interval(candles, point)
+            itvl = compute_interval(candles, fcst.point)
+            point, lo, hi = fcst.point, itvl.low, itvl.high
 
             fg_str = (
                 f"F&G={sent_bundle.fear_greed.value}({sent_bundle.fear_greed.classification})"
@@ -119,6 +120,7 @@ def run_once() -> bool:
                 point=point,
                 low=lo,
                 high=hi,
+                features={**fcst.features, **itvl.features},
             )
             any_success = True
 

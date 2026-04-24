@@ -7,22 +7,39 @@ and back-fills the `realized_*`, `ape`, and `interval_score` fields.
 
 Log file location: ~/.precog_baseline/forecasts.jsonl  (configurable via env)
 
-Record schema
--------------
+Record schema (v2)
+------------------
 {
-  "logged_at":          "2024-11-14T18:15:01.123456Z",  # wall-clock time
-  "prediction_ts":      "2024-11-14T18:15:00.000000Z",  # from synapse.timestamp
+  "logged_at":          "2026-04-24T18:15:01.123456Z",   # wall-clock time
+  "prediction_ts":      "2026-04-24T18:15:00.000000Z",   # from synapse.timestamp
+  "schema_version":     "v2",
   "asset":              "btc",
   "spot":               65000.0,    # price at prediction time
   "point":              65020.0,    # our point forecast
   "low":                63800.0,    # our interval lower bound
   "high":               66200.0,    # our interval upper bound
+  "features": {                     # nested; only present when supplied
+     "ret_5m":              0.00032,
+     "ret_15m":            -0.00014,
+     "point_shrinkage":     0.10,
+     "sentiment_sig":      -0.42,   # absent if sentiment was None
+     "sentiment_weight":    0.15,   # absent if sentiment was None
+     "futures_sig":         0.038,  # absent if futures was None
+     "futures_weight":      0.10,   # absent if futures was None
+     "hourly_vol":          0.015,
+     "interval_multiplier": 1.0
+     # fallback rows use "point_fallback" / "interval_fallback" markers instead
+  },
   "realized_price_1h":  null,       # filled 1h later
   "realized_min_1h":    null,       # filled 1h later (candle lows)
   "realized_max_1h":    null,       # filled 1h later (candle highs)
   "ape":                null,       # filled 1h later
   "interval_score":     null        # filled 1h later (approximate)
 }
+
+v1 rows (pre-Phase-1) lack `schema_version` and `features`. fill_realized()
+tolerates both shapes — the on-disk row is rewritten in place, preserving
+whichever schema it started with.
 """
 import json
 import logging
@@ -47,9 +64,16 @@ def log_forecast(
     point: float,
     low: float,
     high: float,
+    features: dict | None = None,
 ) -> None:
     """
     Append one forecast record to the JSONL log.
+
+    Args:
+        features: Optional nested dict of inputs that materially affected
+                  point/low/high. When None, the `features` key is omitted
+                  from the row entirely (so readers can distinguish "no
+                  features captured" from "features captured as empty").
 
     Silently swallows I/O errors so that a logging failure never crashes
     the miner's forward function.
@@ -57,6 +81,7 @@ def log_forecast(
     record = {
         "logged_at": datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%S.%f") + "Z",
         "prediction_ts": timestamp,
+        "schema_version": "v2",
         "asset": asset,
         "spot": spot,
         "point": point,
@@ -68,6 +93,8 @@ def log_forecast(
         "ape": None,
         "interval_score": None,
     }
+    if features is not None:
+        record["features"] = features
 
     with _write_lock:
         try:
@@ -84,6 +111,9 @@ def fill_realized() -> int:
     Reads FORECAST_LOG_FILE, finds records where `realized_price_1h` is None
     and the horizon has elapsed, fetches the corresponding Binance candles,
     and rewrites the file with the filled-in values.
+
+    Tolerates both v1 (no schema_version, no features) and v2 rows — each is
+    rewritten preserving its original schema. No schema coercion.
 
     Returns:
         Number of records updated.
@@ -115,7 +145,7 @@ def fill_realized() -> int:
         if rec.get("realized_price_1h") is not None:
             continue  # already filled
 
-        # Parse prediction timestamp
+        # Parse prediction timestamp (both v1 and v2 use the same key)
         try:
             pred_ts = datetime.fromisoformat(
                 rec["prediction_ts"].replace("Z", "+00:00")
@@ -131,7 +161,6 @@ def fill_realized() -> int:
         # Fetch the 1-hour window of 1-min candles from Binance
         try:
             asset = rec["asset"]
-            # Convert to milliseconds for the Binance startTime/endTime params
             start_ms = int(pred_ts.timestamp() * 1000)
             end_ms = int(eval_ts.timestamp() * 1000)
 

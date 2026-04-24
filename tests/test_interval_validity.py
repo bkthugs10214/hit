@@ -65,38 +65,38 @@ POINT = 60_000.0
 def test_interval_min_width_normal():
     """Half-width >= MIN_HALF_WIDTH_PCT for normal data."""
     candles = make_candles(60)
-    lo, hi = compute_interval(candles, POINT)
-    half = (hi - lo) / 2
+    result = compute_interval(candles, POINT)
+    half = (result.high - result.low) / 2
     assert half / POINT >= _MIN_HALF_WIDTH_PCT - 1e-10
 
 
 def test_interval_max_width_high_vol():
     """Half-width <= MAX_HALF_WIDTH_PCT even for extreme volatility."""
     candles = make_high_vol_candles(60)
-    lo, hi = compute_interval(candles, POINT)
-    half = (hi - lo) / 2
+    result = compute_interval(candles, POINT)
+    half = (result.high - result.low) / 2
     assert half / POINT <= _MAX_HALF_WIDTH_PCT + 1e-10
 
 
 def test_interval_floor_on_zero_vol():
     """Flat prices → realized vol is 0 → floor clamp kicks in."""
     candles = make_flat_candles(60)
-    lo, hi = compute_interval(candles, POINT)
-    half = (hi - lo) / 2
+    result = compute_interval(candles, POINT)
+    half = (result.high - result.low) / 2
     assert half / POINT >= _MIN_HALF_WIDTH_PCT - 1e-10
 
 
 def test_interval_symmetric():
     """Interval should be symmetric around the point."""
     candles = make_candles(60)
-    lo, hi = compute_interval(candles, POINT)
-    assert abs((POINT - lo) - (hi - POINT)) < 1e-6
+    result = compute_interval(candles, POINT)
+    assert abs((POINT - result.low) - (result.high - POINT)) < 1e-6
 
 
 def test_interval_wider_with_larger_multiplier():
     """Increasing multiplier should produce a wider interval (up to the cap)."""
     candles = make_candles(60, vol=0.001)
-    lo1, hi1 = compute_interval(candles, POINT, multiplier=0.5)
-    lo2, hi2 = compute_interval(candles, POINT, multiplier=2.0)
+    r1 = compute_interval(candles, POINT, multiplier=0.5)
+    r2 = compute_interval(candles, POINT, multiplier=2.0)
     # Could hit the ceiling with multiplier=2, but should be >= multiplier=0.5
-    assert (hi2 - lo2) >= (hi1 - lo1) - 1e-6
+    assert (r2.high - r2.low) >= (r1.high - r1.low) - 1e-6

@@ -100,7 +100,7 @@ async def forward(synapse, cm):
             fut_sig = futures_signal(fut_bundle)
             log_futures(asset, fut_bundle, fut_sig)
 
-            point = compute_point_forecast(
+            fcst = compute_point_forecast(
                 candles,
                 shrinkage=POINT_SHRINKAGE,
                 sentiment=sent_sig,
@@ -108,23 +108,24 @@ async def forward(synapse, cm):
                 futures=fut_sig,
                 futures_weight=FUTURES_WEIGHT,
             )
-            lo, hi = compute_interval(candles, point, multiplier=INTERVAL_MULTIPLIER)
+            itvl = compute_interval(candles, fcst.point, multiplier=INTERVAL_MULTIPLIER)
 
-            predictions[asset] = round(point, 4)
-            intervals[asset] = [round(lo, 4), round(hi, 4)]
+            predictions[asset] = round(fcst.point, 4)
+            intervals[asset] = [round(itvl.low, 4), round(itvl.high, 4)]
 
             log_forecast(
                 asset=asset,
                 timestamp=str(getattr(synapse, "timestamp", "")),
                 spot=spot,
-                point=point,
-                low=lo,
-                high=hi,
+                point=fcst.point,
+                low=itvl.low,
+                high=itvl.high,
+                features={**fcst.features, **itvl.features},
             )
 
             bt.logging.info(
                 f"[baseline] {asset}: spot=${spot:.2f}  "
-                f"point=${point:.2f}  interval=[${lo:.2f}, ${hi:.2f}]"
+                f"point=${fcst.point:.2f}  interval=[${itvl.low:.2f}, ${itvl.high:.2f}]"
             )
             continue  # success — move to next asset
 

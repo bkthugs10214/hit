@@ -26,7 +26,8 @@ Formula
                      max=point × 0.075)
   [low, high] = [point − half, point + half]
 """
-import math
+from dataclasses import dataclass
+from typing import Any
 
 import pandas as pd
 
@@ -37,11 +38,28 @@ _MIN_HALF_WIDTH_PCT = 0.001   # 0.1%  — never produce a zero-width interval
 _MAX_HALF_WIDTH_PCT = 0.075   # 7.5%  — 15% total; wider than this is too sloppy
 
 
+@dataclass(frozen=True)
+class IntervalResult:
+    """
+    Output of compute_interval.
+
+    features contains only the inputs that materially affected (low, high):
+      - Happy path: hourly_vol, interval_multiplier
+      - Fallback (< 20 candles): {"interval_fallback": "insufficient_candles"}
+
+    Derived values (raw_half, clamp bounds, final half) are NOT logged:
+    they are reconstructable from the inputs plus the module constants.
+    """
+    low: float
+    high: float
+    features: dict[str, Any]
+
+
 def compute_interval(
     candles: pd.DataFrame,
     point: float,
     multiplier: float = 1.0,
-) -> tuple[float, float]:
+) -> IntervalResult:
     """
     Compute a [low, high] interval around the point forecast.
 
@@ -53,13 +71,17 @@ def compute_interval(
                     Increase to widen (better inclusion, lower width_factor).
 
     Returns:
-        (low, high) with low < high and both > 0.
+        IntervalResult(low, high, features) with low < high and both > 0.
         Falls back to fixed ±2% around point if fewer than 20 candles.
     """
     if len(candles) < 20:
         # Fixed-width fallback: ±2%
         margin = point * 0.02
-        return point - margin, point + margin
+        return IntervalResult(
+            low=point - margin,
+            high=point + margin,
+            features={"interval_fallback": "insufficient_candles"},
+        )
 
     hourly_vol = hourly_vol_estimate(candles)
     raw_half = multiplier * hourly_vol * point
@@ -68,4 +90,11 @@ def compute_interval(
     max_half = point * _MAX_HALF_WIDTH_PCT
     half = max(min_half, min(raw_half, max_half))
 
-    return point - half, point + half
+    return IntervalResult(
+        low=point - half,
+        high=point + half,
+        features={
+            "hourly_vol": hourly_vol,
+            "interval_multiplier": multiplier,
+        },
+    )

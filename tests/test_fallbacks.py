@@ -38,22 +38,29 @@ def test_point_forecast_persistence_on_short_data():
     """< 16 candles → fall back to spot (persistence), no exception."""
     candles = short_candles(5)
     result = compute_point_forecast(candles)
-    assert result == pytest.approx(60_000.0)
+    assert result.point == pytest.approx(60_000.0)
 
 
 def test_point_forecast_persistence_on_exactly_15_candles():
     """Boundary: exactly 15 candles → persistence (needs 16 for momentum)."""
     candles = short_candles(15)
     result = compute_point_forecast(candles)
-    assert result == pytest.approx(60_000.0)
+    assert result.point == pytest.approx(60_000.0)
 
 
 def test_point_forecast_uses_momentum_on_16_candles():
     """Boundary: 16 candles → momentum path is taken (no exception)."""
     candles = short_candles(16)
     result = compute_point_forecast(candles)
-    assert isinstance(result, float)
-    assert result > 0
+    assert isinstance(result.point, float)
+    assert result.point > 0
+
+
+def test_point_forecast_fallback_marker_in_features():
+    """Fallback path: features should contain point_fallback marker, no ret_* keys."""
+    candles = short_candles(5)
+    result = compute_point_forecast(candles)
+    assert result.features == {"point_fallback": "insufficient_candles"}
 
 
 def test_point_forecast_empty_raises():
@@ -70,27 +77,34 @@ def test_interval_fixed_fallback_on_short_data():
     """< 20 candles → fixed ±2% interval, no exception."""
     candles = short_candles(5)
     point = 60_000.0
-    lo, hi = compute_interval(candles, point)
-    assert lo == pytest.approx(60_000.0 * 0.98, rel=1e-6)
-    assert hi == pytest.approx(60_000.0 * 1.02, rel=1e-6)
+    result = compute_interval(candles, point)
+    assert result.low == pytest.approx(60_000.0 * 0.98, rel=1e-6)
+    assert result.high == pytest.approx(60_000.0 * 1.02, rel=1e-6)
 
 
 def test_interval_fixed_fallback_on_exactly_19_candles():
     """Boundary: exactly 19 candles → fixed fallback."""
     candles = short_candles(19)
     point = 60_000.0
-    lo, hi = compute_interval(candles, point)
-    assert lo == pytest.approx(60_000.0 * 0.98, rel=1e-6)
-    assert hi == pytest.approx(60_000.0 * 1.02, rel=1e-6)
+    result = compute_interval(candles, point)
+    assert result.low == pytest.approx(60_000.0 * 0.98, rel=1e-6)
+    assert result.high == pytest.approx(60_000.0 * 1.02, rel=1e-6)
 
 
 def test_interval_uses_vol_on_20_candles():
     """Boundary: 20 candles → vol path is taken, result is valid."""
     candles = short_candles(20)
     point = 60_000.0
-    lo, hi = compute_interval(candles, point)
-    assert lo < hi
-    assert lo > 0
+    result = compute_interval(candles, point)
+    assert result.low < result.high
+    assert result.low > 0
+
+
+def test_interval_fallback_marker_in_features():
+    """Fallback path: features should contain interval_fallback marker, no hourly_vol."""
+    candles = short_candles(5)
+    result = compute_interval(candles, 60_000.0)
+    assert result.features == {"interval_fallback": "insufficient_candles"}
 
 
 # ── Metrics sanity ────────────────────────────────────────────────────────────

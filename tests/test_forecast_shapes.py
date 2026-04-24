@@ -6,8 +6,14 @@ import numpy as np
 import pandas as pd
 import pytest
 
-from precog_baseline_miner.forecast.baseline import compute_point_forecast
-from precog_baseline_miner.forecast.interval import compute_interval
+from precog_baseline_miner.forecast.baseline import (
+    ForecastResult,
+    compute_point_forecast,
+)
+from precog_baseline_miner.forecast.interval import (
+    IntervalResult,
+    compute_interval,
+)
 
 
 # ── Helpers ───────────────────────────────────────────────────────────────────
@@ -29,16 +35,18 @@ def make_candles(n: int = 60, start_price: float = 60_000.0) -> pd.DataFrame:
 
 # ── Point forecast tests ──────────────────────────────────────────────────────
 
-def test_point_forecast_returns_float():
+def test_point_forecast_returns_result_dataclass():
     candles = make_candles(60)
     result = compute_point_forecast(candles)
-    assert isinstance(result, float)
+    assert isinstance(result, ForecastResult)
+    assert isinstance(result.point, float)
+    assert isinstance(result.features, dict)
 
 
 def test_point_forecast_is_positive():
     candles = make_candles(60)
     result = compute_point_forecast(candles)
-    assert result > 0
+    assert result.point > 0
 
 
 def test_point_forecast_close_to_spot():
@@ -46,7 +54,7 @@ def test_point_forecast_close_to_spot():
     candles = make_candles(60)
     spot = float(candles["close"].iloc[-1])
     result = compute_point_forecast(candles, shrinkage=0.10)
-    assert abs(result - spot) / spot < 0.01
+    assert abs(result.point - spot) / spot < 0.01
 
 
 def test_point_forecast_zero_shrinkage_equals_spot():
@@ -54,39 +62,81 @@ def test_point_forecast_zero_shrinkage_equals_spot():
     candles = make_candles(60)
     spot = float(candles["close"].iloc[-1])
     result = compute_point_forecast(candles, shrinkage=0.0)
-    assert result == pytest.approx(spot)
+    assert result.point == pytest.approx(spot)
+
+
+def test_point_forecast_features_contain_momentum_inputs():
+    """Happy path: ret_5m and ret_15m are present — they materially affect point."""
+    candles = make_candles(60)
+    result = compute_point_forecast(candles)
+    assert "ret_5m" in result.features
+    assert "ret_15m" in result.features
+    assert "point_shrinkage" in result.features
+
+
+def test_point_forecast_features_omit_sentiment_when_none():
+    """When sentiment=None, sentiment_sig/weight must not appear in features."""
+    candles = make_candles(60)
+    result = compute_point_forecast(candles, sentiment=None, futures=None)
+    assert "sentiment_sig" not in result.features
+    assert "sentiment_weight" not in result.features
+    assert "futures_sig" not in result.features
+    assert "futures_weight" not in result.features
+
+
+def test_point_forecast_features_include_supplied_signals():
+    """When sentiment and futures are supplied, both sig+weight are logged."""
+    candles = make_candles(60)
+    result = compute_point_forecast(
+        candles, sentiment=-0.42, sentiment_weight=0.15,
+        futures=0.038, futures_weight=0.10,
+    )
+    assert result.features["sentiment_sig"] == pytest.approx(-0.42)
+    assert result.features["sentiment_weight"] == pytest.approx(0.15)
+    assert result.features["futures_sig"] == pytest.approx(0.038)
+    assert result.features["futures_weight"] == pytest.approx(0.10)
 
 
 # ── Interval forecast tests ───────────────────────────────────────────────────
 
-def test_interval_returns_two_floats():
+def test_interval_returns_result_dataclass():
     candles = make_candles(60)
-    point = compute_point_forecast(candles)
-    result = compute_interval(candles, point)
-    assert len(result) == 2
-    lo, hi = result
-    assert isinstance(lo, float)
-    assert isinstance(hi, float)
+    fcst = compute_point_forecast(candles)
+    result = compute_interval(candles, fcst.point)
+    assert isinstance(result, IntervalResult)
+    assert isinstance(result.low, float)
+    assert isinstance(result.high, float)
+    assert isinstance(result.features, dict)
 
 
 def test_interval_low_less_than_high():
     candles = make_candles(60)
-    point = compute_point_forecast(candles)
-    lo, hi = compute_interval(candles, point)
-    assert lo < hi
+    fcst = compute_point_forecast(candles)
+    result = compute_interval(candles, fcst.point)
+    assert result.low < result.high
 
 
 def test_interval_contains_point():
     """The point forecast should always lie inside the interval."""
     candles = make_candles(60)
-    point = compute_point_forecast(candles)
-    lo, hi = compute_interval(candles, point)
-    assert lo <= point <= hi
+    fcst = compute_point_forecast(candles)
+    result = compute_interval(candles, fcst.point)
+    assert result.low <= fcst.point <= result.high
 
 
 def test_interval_both_positive():
     candles = make_candles(60)
-    point = compute_point_forecast(candles)
-    lo, hi = compute_interval(candles, point)
-    assert lo > 0
-    assert hi > 0
+    fcst = compute_point_forecast(candles)
+    result = compute_interval(candles, fcst.point)
+    assert result.low > 0
+    assert result.high > 0
+
+
+def test_interval_features_contain_vol_and_multiplier():
+    """Happy path: hourly_vol and interval_multiplier are both present."""
+    candles = make_candles(60)
+    fcst = compute_point_forecast(candles)
+    result = compute_interval(candles, fcst.point, multiplier=1.0)
+    assert "hourly_vol" in result.features
+    assert "interval_multiplier" in result.features
+    assert result.features["interval_multiplier"] == pytest.approx(1.0)
